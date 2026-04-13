@@ -5,13 +5,15 @@
 //  );
 // INSERT INTO seats (isbooked)
 // SELECT 0 FROM generate_series(1, 20);
-
+import "dotenv/config";
 import express from "express";
 import pg from "pg";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
-
+import authRouter from "./src/modules/auth/auth.routes.js";
+import globalErrorMiddleware from "./src/common/middlewares/error.middleware.js";
+import checkDB from "./src/common/config/db.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const port = process.env.PORT || 8080;
@@ -21,22 +23,24 @@ const port = process.env.PORT || 8080;
 // If you pick one connection out of the pool and release it
 // the pooler will keep that connection open for sometime to other clients to reuse
 const pool = new pg.Pool({
-  host: "localhost",
-  port: 5433,
-  user: "postgres",
-  password: "postgres",
-  database: "sql_class_2_db",
+  host: "127.0.0.1",
+  port: 5432,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   max: 20,
   connectionTimeoutMillis: 0,
   idleTimeoutMillis: 0,
 });
 
 const app = new express();
+app.use(express.json());
 app.use(cors());
 
 app.get("/", (req, res) => {
   res.sendFile(__dirname + "/index.html");
 });
+app.use("/api/auth", authRouter);
 //get all seats
 app.get("/seats", async (req, res) => {
   const result = await pool.query("select * from seats"); // equivalent to Seats.find() in mongoose
@@ -82,5 +86,14 @@ app.put("/:id/:name", async (req, res) => {
     res.send(500);
   }
 });
+ try {
+    const client = await pool.connect();
+    console.log("✅ Connected to DB");
 
+    client.release(); // VERY IMPORTANT
+  } catch (err) {
+    console.error("❌ Connection failed:", err);
+  }
+app.use(globalErrorMiddleware);
 app.listen(port, () => console.log("Server starting on port: " + port));
+export default pool;
