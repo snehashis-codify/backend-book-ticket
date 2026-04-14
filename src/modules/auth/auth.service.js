@@ -52,6 +52,29 @@ class AuthService {
     connection.release();
     return { ...userData, refreshToken, accessToken };
   }
+
+  async refreshAccessTokenService(token) {
+    if (!token) throw ApiError.Unauthorized("Missing token");
+    const decoded = this.verifyRefreshToken(token);
+    if (!decoded) throw ApiError.Unauthorized("Invalid token");
+    const connection = await pool.connect();
+    const { id } = decoded;
+    const isUserValid = await connection.query(
+      "SELECT name,email,refresh_token FROM users WHERE user_id=$1",
+      [id],
+    );
+    if (isUserValid.rowCount <= 0) throw ApiError.Notfound("User not found");
+    const { refresh_token: refreshToken } = isUserValid.rows[0];
+    if (refreshToken !== this.hashToken(token))
+      throw ApiError.Unauthorized("Incorrect token");
+    const newAccessToken = this.#generateAccessToken({ id, name, email });
+    connection.release();
+    return newAccessToken;
+  }
+
+  async getProfileService(userData) {
+    return userData
+  }
   async #hashPassword(cleanPassword) {
     return await bcrypt.hash(cleanPassword, 10);
   }
@@ -68,7 +91,14 @@ class AuthService {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY ?? "7d",
     });
   }
-  async #generateNewAccessToken(token) {}
+
+  verifyAccessToken(token) {
+    return jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+  }
+  verifyRefreshToken(token) {
+    return jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
+  }
+
   hashToken(token) {
     return crypto.createHash("sha256").update(token).digest("hex");
   }

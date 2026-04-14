@@ -18,5 +18,18 @@ class AuthController {
       next(error);
     }
   }
+  async refreshAccessTokenController(req, res, next) {
+    try {
+      const result = await authService.refreshAccessTokenService(
+        req.params.token,
+      );
+      ApiResponse.ok(res, "Token generated successfully", result);
+    } catch (error) {
+      next(error);
+    }
+  }
+  getMeController(req,res,next) {
+    
+  }
 }
 export default AuthController;
