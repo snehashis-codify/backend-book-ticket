@@ -12,8 +12,11 @@ import { dirname } from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import authRouter from "./src/modules/auth/auth.routes.js";
+import cookieParser from "cookie-parser";
 import globalErrorMiddleware from "./src/common/middlewares/error.middleware.js";
-import checkDB from "./src/common/config/db.js";
+import authenticate from "./src/modules/auth/auth.middleware.js";
+import ApiError from "./src/common/util/api-error.js";
+import ApiResponse from "./src/common/util/api-response.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const port = process.env.PORT || 8080;
@@ -35,6 +38,7 @@ const pool = new pg.Pool({
 
 const app = new express();
 app.use(express.json());
+app.use(cookieParser());
 app.use(cors());
 
 app.get("/", (req, res) => {
@@ -49,13 +53,19 @@ app.get("/seats", async (req, res) => {
 
 //book a seat give the seatId and your name
 
-app.put("/:id/:name", async (req, res) => {
+app.put("/:id/:name", authenticate, async (req, res,next) => {
   try {
     const id = req.params.id;
     const name = req.params.name;
+    const { email } = req.user;
     // payment integration should be here
     // verify payment
     const conn = await pool.connect(); // pick a connection from the pool
+    const isUserExist = await conn.query(
+      "SELECT * FROM users WHERE name=$1 AND email=$2",
+      [name, email],
+    );
+    if (isUserExist.rowCount <=0 ) throw ApiError.Notfound("User not found");
     //begin transaction
     // KEEP THE TRANSACTION AS SMALL AS POSSIBLE
     await conn.query("BEGIN");
@@ -70,30 +80,33 @@ app.put("/:id/:name", async (req, res) => {
     //if no rows found then the operation should fail can't book
     // This shows we Do not have the current seat available for booking
     if (result.rowCount === 0) {
-      res.send({ error: "Seat already booked" });
-      return;
+      conn.query("ROLLBACK")
+      throw ApiError.Conflict("Seat already booked");
     }
     //if we get the row, we are safe to update
-    const sqlU = "update seats set isbooked = 1, name = $2 where id = $1";
+    const sqlU = "update seats set isbooked = 1, name = $2 where id = $1 RETURNING name,id";
     const updateResult = await conn.query(sqlU, [id, name]); // Again to avoid SQL INJECTION we are using $1 and $2 as placeholders
 
     //end transaction by committing
     await conn.query("COMMIT");
     conn.release(); // release the connection back to the pool (so we do not keep the connection open unnecessarily)
-    res.send(updateResult);
+    ApiResponse.ok(res, "Seat booked successfully", updateResult.rows);
+    // res.send(updateResult);
   } catch (ex) {
-    console.log(ex);
-    res.send(500);
+    // console.log(ex);
+    // res.send(500);
+    
+    next(ex)
   }
 });
- try {
-    const client = await pool.connect();
-    console.log("✅ Connected to DB");
+try {
+  const client = await pool.connect();
+  console.log("✅ Connected to DB");
 
-    client.release(); // VERY IMPORTANT
-  } catch (err) {
-    console.error("❌ Connection failed:", err);
-  }
+  client.release(); // VERY IMPORTANT
+} catch (err) {
+  console.error("❌ Connection failed:", err);
+}
 app.use(globalErrorMiddleware);
 app.listen(port, () => console.log("Server starting on port: " + port));
 export default pool;
